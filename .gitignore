@@ -22,6 +22,15 @@ node_modules/
 dist/
 build/
 .swa/
+.vite/
+
+# Azure Functions generated or local artifacts
+.python_packages/
+functions.metadata
+__blobstorage__/
+__queuestorage__/
+__azurite_db*__.json
+.azurite/
 
 # Environment files (keep sanitized examples)
 .env
