@@ -16,9 +16,9 @@ The interface is intentionally small so it can grow.
 
 Planned work for this folder:
 
-- A page where a user can submit one customer review
+- A page where a user can submit one customer review (this has been implemented as of 10/29/26)***
 - CSV upload for a batch of reviews
-- Views for review history, charts, trends, and filters
+- Views for review history, charts, trends, and filters (review history implemented as of 10/29/26)***
 
 Azure Static Web Apps is the planned host. In Azure, the page calls Functions on the same origin. The Vite proxy is used only by `npm run dev`.
 
