@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import {
+  PieChart,
+  Pie,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts'
+
 const LOADING = 'loading'
 const CONNECTED = 'connected'
 const FAILED = 'failed'
@@ -21,6 +34,9 @@ export default function App() {
   const [review, setReview] = useState('')
   const [result, setResult] = useState(null)
   const [reviews, setReviews] = useState(sampleReviews)
+  const [selectedSentiment, setSelectedSentiment] = useState('All')
+  const [csvReviews, setCsvReviews] = useState([])
+  const [csvError, setCsvError] = useState('')
   const requestId = useRef(0)
 
   // Check whether the backend API is available
@@ -83,6 +99,70 @@ export default function App() {
     setReview('')
   }
 
+  // Read customer reviews from a CSV file
+  function handleCsvUpload(event) {
+    const file = event.target.files[0]
+
+    setCsvReviews([])
+    setCsvError('')
+
+    if (!file) return
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setCsvError('Please select a CSV file.')
+      return
+    }
+
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      const content = e.target.result
+      const lines = content.split(/\r?\n/).filter((line) => line.trim() !== '')
+
+      if (lines.length < 2) {
+        setCsvError('The CSV file must contain a header and at least one review.')
+        return
+      }
+
+      const headers = lines[0]
+        .split(',')
+        .map((header) => header.trim().replace(/^"|"$/g, '').toLowerCase())
+
+      const reviewColumn = headers.findIndex(
+        (header) => header === 'review' || header === 'text' || header === 'feedback'
+      )
+
+      if (reviewColumn === -1) {
+        setCsvError('Your CSV needs a column named review, text, or feedback.')
+        return
+      }
+
+      const loadedReviews = lines
+        .slice(1)
+        .map((line, index) => {
+          const values = line.split(',')
+          const text = values[reviewColumn]?.trim().replace(/^"|"$/g, '')
+
+          return text
+            ? { id: `${file.name}-${index}`, text }
+            : null
+        })
+        .filter(Boolean)
+
+      if (loadedReviews.length === 0) {
+        setCsvError('No customer reviews were found in the file.')
+        return
+      }
+
+      setCsvReviews(loadedReviews)
+    }
+
+    reader.onerror = () => {
+      setCsvError('There was a problem reading the file.')
+    }
+
+    reader.readAsText(file)
+  }
   // Calculate dashboard statistics
   const totalReviews = reviews.length
 
@@ -93,6 +173,24 @@ export default function App() {
     totalReviews === 0
       ? 0
       : Math.round((countSentiment(sentiment) / totalReviews) * 100)
+
+  // Prepare the data for the charts
+  const sentimentData = ['Positive', 'Negative', 'Neutral', 'Mixed'].map(
+    (sentiment) => ({
+      name: sentiment,
+      value: countSentiment(sentiment),
+    })
+  )
+
+  const barData = sentimentData
+
+  // Filter reviews based on the selected sentiment
+  const filteredReviews =
+    selectedSentiment === 'All'
+      ? reviews
+      : reviews.filter(
+          (item) => item.sentiment === selectedSentiment
+        )
 
   return (
     <main>
@@ -138,6 +236,35 @@ export default function App() {
 
           <button type="submit">Submit Review</button>
         </form>
+
+          {/* CSV upload */}
+          <section>
+            <h2>Upload Customer Reviews</h2>
+
+            <p>Select a CSV file containing a review, text, or feedback column.</p>
+
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleCsvUpload}
+            />
+
+            {csvError && <p role="alert">{csvError}</p>}
+
+            {csvReviews.length > 0 && (
+              <div>
+                <h3>CSV Preview</h3>
+
+                <p>Reviews found: {csvReviews.length}</p>
+
+                {csvReviews.map((item) => (
+                  <article key={item.id} className="review-item">
+                    <p>{item.text}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
         {/* Submission confirmation */}
         {result && (
@@ -188,15 +315,70 @@ export default function App() {
             <strong>Pending:</strong> {countSentiment('Pending')}
           </p>
         </div>
+
+          {/* Pie chart */}
+          <h3>Sentiment Distribution</h3>
+
+          <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={sentimentData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={100}
+                  label
+                />
+
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+        {/* Bar chart */}
+        <h3>Review Counts by Sentiment</h3>
+
+        <div style={{ width: '100%', height: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={barData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="value" name="Number of Reviews" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </section>
 
       {/* Review history */}
       <section>
         <h2>Review History</h2>
 
-        {reviews.length === 0 && <p>No reviews have been submitted yet.</p>}
+        <label htmlFor="sentiment-filter">Filter by sentiment:</label>
 
-        {reviews.map((item) => (
+        <select
+          id="sentiment-filter"
+          value={selectedSentiment}
+          onChange={(event) => setSelectedSentiment(event.target.value)}
+        >
+          <option value="All">All Reviews</option>
+          <option value="Positive">Positive</option>
+          <option value="Negative">Negative</option>
+          <option value="Neutral">Neutral</option>
+          <option value="Mixed">Mixed</option>
+          <option value="Pending">Pending</option>
+        </select>
+
+        {filteredReviews.length === 0 && (
+          <p>No reviews match this filter.</p>
+        )}
+
+        {filteredReviews.map((item) => (
           <article className="review-item" key={item.id}>
             <p>{item.text}</p>
 
