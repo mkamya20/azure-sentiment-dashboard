@@ -1,1 +1,3 @@
 azure-functions==1.25.0
+azure-ai-textanalytics
+azure-core

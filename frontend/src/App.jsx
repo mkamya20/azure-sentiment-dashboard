@@ -11,7 +11,10 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  Rectangle,
 } from 'recharts'
+
+import Papa from 'papaparse'
 
 const LOADING = 'loading'
 const CONNECTED = 'connected'
@@ -77,32 +80,59 @@ export default function App() {
   }, [checkHealth])
 
   // Add a submitted review to the dashboard
-  function handleSubmit(event) {
-    event.preventDefault()
 
-    if (!review.trim()) return
+async function handleSubmit(event) {
+  event.preventDefault()
 
+  if (!review.trim()) return
+
+  try {
+    // Send the review to the Azure Functions backend.
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: review.trim() }),
+    })
+
+    // Get the sentiment analysis result.
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Sentiment analysis failed.')
+    }
+
+    // Add the analyzed review to the dashboard.
     const newReview = {
       id: Date.now(),
       text: review.trim(),
-      sentiment: 'Pending',
+      sentiment: data.sentiment,
     }
-    // Add the new review to the beginning of the list
+
     setReviews((previousReviews) => [newReview, ...previousReviews])
 
-    // Display a submission confirmation
+    // Display the analysis result.
     setResult({
       text: newReview.text,
       sentiment: newReview.sentiment,
     })
-    // Clear the text box
+
+    // Clear the review input.
     setReview('')
+
+  } catch (error) {
+    setResult({
+      text: review.trim(),
+      sentiment: 'Error: ' + error.message,
+    })
   }
+}
 
   // Read customer reviews from a CSV file
+
   function handleCsvUpload(event) {
     const file = event.target.files[0]
-
     setCsvReviews([])
     setCsvError('')
 
@@ -113,56 +143,52 @@ export default function App() {
       return
     }
 
-    const reader = new FileReader()
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
 
-    reader.onload = (e) => {
-      const content = e.target.result
-      const lines = content.split(/\r?\n/).filter((line) => line.trim() !== '')
+      complete: (results) => {
+        const headers = results.meta.fields || []
 
-      if (lines.length < 2) {
-        setCsvError('The CSV file must contain a header and at least one review.')
-        return
-      }
+        // Find the column containing the customer reviews.
+        const reviewColumn = headers.find((header) =>
+          ['review_text', 'review', 'text', 'feedback'].includes(
+            header.trim().toLowerCase()
+          )
+        )
 
-      const headers = lines[0]
-        .split(',')
-        .map((header) => header.trim().replace(/^"|"$/g, '').toLowerCase())
+        if (!reviewColumn) {
+          setCsvError(
+            'Your CSV needs a column named review_text, review, text, or feedback.'
+          )
+          return
+        }
 
-      const reviewColumn = headers.findIndex(
-        (header) => header === 'review' || header === 'text' || header === 'feedback'
-      )
+        // Extract the reviews from the selected column.
+        const loadedReviews = results.data
+          .map((row, index) => {
+            const text = row[reviewColumn]?.trim()
 
-      if (reviewColumn === -1) {
-        setCsvError('Your CSV needs a column named review, text, or feedback.')
-        return
-      }
+            return text
+              ? { id: `${file.name}-${index}`, text }
+              : null
+          })
+          .filter(Boolean)
 
-      const loadedReviews = lines
-        .slice(1)
-        .map((line, index) => {
-          const values = line.split(',')
-          const text = values[reviewColumn]?.trim().replace(/^"|"$/g, '')
+        if (loadedReviews.length === 0) {
+          setCsvError('No customer reviews were found in the file.')
+          return
+        }
 
-          return text
-            ? { id: `${file.name}-${index}`, text }
-            : null
-        })
-        .filter(Boolean)
+        setCsvReviews(loadedReviews)
+      },
 
-      if (loadedReviews.length === 0) {
-        setCsvError('No customer reviews were found in the file.')
-        return
-      }
-
-      setCsvReviews(loadedReviews)
-    }
-
-    reader.onerror = () => {
-      setCsvError('There was a problem reading the file.')
-    }
-
-    reader.readAsText(file)
+      error: () => {
+        setCsvError('There was a problem reading the file.')
+      },
+    })
   }
+
   // Calculate dashboard statistics
   const totalReviews = reviews.length
 
@@ -175,10 +201,18 @@ export default function App() {
       : Math.round((countSentiment(sentiment) / totalReviews) * 100)
 
   // Prepare the data for the charts
+  const sentimentColors = {
+    Positive: '#23865A',
+    Negative: '#D94B4B',
+    Neutral: '#3478C5',
+    Mixed: '#8957B2',
+  }
+
   const sentimentData = ['Positive', 'Negative', 'Neutral', 'Mixed'].map(
     (sentiment) => ({
       name: sentiment,
       value: countSentiment(sentiment),
+      fill: sentimentColors[sentiment],
     })
   )
 
@@ -196,9 +230,8 @@ export default function App() {
     <main>
       <h1>Customer Sentiment Dashboard</h1>
       <p className="intro">
-        Review customer feedback and monitor sentiment trends.
-        Review submission, CSV upload, charts, and history will be added in a later milestone.
-        This page checks whether the API is reachable.
+        Submit customer reviews, analyze sentiment using Azure AI,
+        upload customer feedback from CSV files, and monitor sentiment trends.
       </p>
 
       {/* Backend connection status */}
@@ -274,10 +307,6 @@ export default function App() {
             <p>
               Sentiment: <strong>{result.sentiment}</strong>
             </p>
-            <p>
-              This is a temporary result. Real AI analysis will be connected
-              in a later step.
-            </p>
           </section>
         )}
       </section>
@@ -349,7 +378,15 @@ export default function App() {
               <YAxis allowDecimals={false} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="value" name="Number of Reviews" />
+
+              <Bar dataKey="value" name="Reviews">
+                {barData.map((entry) => (
+                  <Rectangle
+                    key={entry.name}
+                    fill={sentimentColors[entry.name]}
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -379,7 +416,10 @@ export default function App() {
         )}
 
         {filteredReviews.map((item) => (
-          <article className="review-item" key={item.id}>
+          <article
+            className={`review-item ${item.sentiment.toLowerCase()}`}
+            key={item.id}
+          >
             <p>{item.text}</p>
 
             <p>

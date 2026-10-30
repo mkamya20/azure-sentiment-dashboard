@@ -1,45 +1,62 @@
 
+/* Apply consistent sizing to all elements */
 * {
   box-sizing: border-box;
 }
 
+/* Overall page appearance */
 body {
   margin: 0;
   font-family: Arial, sans-serif;
-  background-color: #f4f6f9;
-  color: #202938;
+  background-color: #eaf0f6;
+  color: #172b4d;
 }
 
+/* Main dashboard container */
 main {
-  max-width: 1000px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 40px 24px;
 }
 
+/* Main heading */
 h1 {
   margin-bottom: 10px;
-  font-size: 32px;
+  font-size: 34px;
+  color: #172b4d;
 }
 
+/* Section headings */
 h2 {
   margin-top: 0;
+  color: #245b83;
+  font-size: 23px;
 }
 
+h3 {
+  color: #245b83;
+}
+
+/* Introductory text */
 .intro {
-  color: #5d6675;
+  color: #64748b;
   margin-bottom: 28px;
   line-height: 1.6;
+  font-size: 16px;
 }
 
+/* Dashboard cards and connection status */
 .status,
 main > section {
-  background-color: white;
-  border: 1px solid #e0e5ec;
-  border-radius: 12px;
-  padding: 24px;
+  background-color: #ffffff;
+  border: 1px solid #dce5ee;
+  border-radius: 14px;
+  padding: 26px;
   margin-bottom: 24px;
+  box-shadow: 0 3px 10px rgba(23, 43, 77, 0.04);
 }
 
+/* Backend connection status */
 .status {
   display: flex;
   justify-content: space-between;
@@ -49,48 +66,114 @@ main > section {
 
 .status p {
   margin: 0;
+  font-weight: bold;
+  color: #23865a;
 }
 
+/* Form labels */
 label {
   display: block;
   margin-bottom: 10px;
   font-weight: bold;
+  color: #334e68;
 }
 
+/* Review text area */
 textarea {
   width: 100%;
   padding: 14px;
-  border: 1px solid #cbd2dc;
-  border-radius: 8px;
+  border: 1px solid #cbd8e5;
+  border-radius: 9px;
   font: inherit;
   resize: vertical;
   margin-bottom: 16px;
+  background-color: #fbfdff;
+  color: #172b4d;
 }
 
 textarea:focus {
-  outline: 2px solid #3778c2;
-  border-color: #3778c2;
+  outline: 2px solid #20a6a0;
+  border-color: #20a6a0;
 }
 
+/* File upload and filter controls */
+input[type="file"],
+select {
+  font: inherit;
+  color: #334e68;
+  margin-bottom: 16px;
+}
+
+select {
+  padding: 10px 14px;
+  border: 1px solid #cbd8e5;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+/* Buttons */
 button {
-  background-color: #245fa6;
+  background-color: #2563a6;
   color: white;
   border: none;
-  border-radius: 8px;
-  padding: 11px 18px;
+  border-radius: 9px;
+  padding: 12px 20px;
   font-size: 15px;
+  font-weight: bold;
   cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
 button:hover {
-  background-color: #194b86;
+  background-color: #20a6a0;
 }
 
 button:focus-visible {
-  outline: 3px solid #8bbcff;
+  outline: 3px solid #8bd6d1;
   outline-offset: 2px;
 }
 
+/* Review history items */
+.review-item {
+  background-color: #f5f9fc;
+  border: 1px solid #e0eaf2;
+  border-left: 4px solid #20a6a0;
+  border-radius: 9px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+
+.review-item p {
+  line-height: 1.5;
+}
+
+.review-item hr {
+  border: none;
+  border-top: 1px solid #e0eaf2;
+}
+
+/* Sentiment overview */
+.sentiment-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.sentiment-summary p {
+  background-color: #f1f6fa;
+  border: 1px solid #e0eaf2;
+  border-radius: 9px;
+  padding: 16px;
+  margin: 0;
+}
+
+/* Charts */
+.recharts-text {
+  fill: #52677d;
+}
+
+/* Mobile layout */
 @media (max-width: 600px) {
   main {
     padding: 24px 16px;
@@ -100,5 +183,57 @@ button:focus-visible {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .sentiment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  .status,
+  main > section {
+    padding: 18px;
+  }
 }
 
+/* Positive reviews */
+.review-item.positive {
+  background-color: #e8f5ee;
+  border-left: 6px solid #23865a;
+}
+
+.review-item.positive strong {
+  color: #23865a;
+}
+
+/* Negative reviews */
+.review-item.negative {
+  background-color: #fcebea;
+  border-left: 6px solid #d94b4b;
+}
+
+.review-item.negative strong {
+  color: #d94b4b;
+}
+
+/* Neutral reviews */
+.review-item.neutral {
+  background-color: #eaf2fc;
+  border-left: 6px solid #3478c5;
+}
+
+.review-item.neutral strong {
+  color: #3478c5;
+}
+
+/* Mixed reviews */
+.review-item.mixed {
+  background-color: #f2ebf8;
+  border-left: 6px solid #8957b2;
+}
+
+.review-item.mixed strong {
+  color: #8957b2;
+}
