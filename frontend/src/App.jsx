@@ -17,6 +17,13 @@ const LOADING = 'loading'
 const CONNECTED = 'connected'
 const FAILED = 'failed'
 
+const SENTIMENT_LABELS = {
+  positive: 'Positive',
+  negative: 'Negative',
+  neutral: 'Neutral',
+  mixed: 'Mixed',
+}
+
 // add sample reviews
 const sampleReviews = [
   { id: 1, text: 'Excellent service and very helpful staff!', sentiment: 'Positive' },
@@ -37,6 +44,8 @@ export default function App() {
   const [selectedSentiment, setSelectedSentiment] = useState('All')
   const [csvReviews, setCsvReviews] = useState([])
   const [csvError, setCsvError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const requestId = useRef(0)
 
   // Check whether the backend API is available
@@ -76,27 +85,65 @@ export default function App() {
     checkHealth()
   }, [checkHealth])
 
-  // Add a submitted review to the dashboard
-  function handleSubmit(event) {
+  // Send one review to Azure AI Language through the backend.
+  async function handleSubmit(event) {
     event.preventDefault()
 
-    if (!review.trim()) return
+    const reviewText = review.trim()
+    if (!reviewText || submitting) return
 
-    const newReview = {
-      id: Date.now(),
-      text: review.trim(),
-      sentiment: 'Pending',
+    setSubmitting(true)
+    setSubmitError('')
+    setResult(null)
+
+    try {
+      const response = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewText }),
+      })
+
+      let body = null
+      try {
+        body = await response.json()
+      } catch {
+        body = null
+      }
+
+      const label = SENTIMENT_LABELS[body?.sentiment]
+      const confidence = body?.confidence
+      const scoresAreNumbers =
+        confidence &&
+        ['positive', 'neutral', 'negative'].every(
+          (key) => typeof confidence[key] === 'number'
+        )
+
+      if (!response.ok || !label || !scoresAreNumbers) {
+        setSubmitError(
+          body?.error || `Analysis failed (HTTP ${response.status}).`
+        )
+        return
+      }
+
+      const analyzedReview = {
+        id: Date.now(),
+        text: body.reviewText || reviewText,
+        sentiment: label,
+        confidence: {
+          positive: confidence.positive,
+          neutral: confidence.neutral,
+          negative: confidence.negative,
+        },
+      }
+
+      setReviews((previousReviews) => [analyzedReview, ...previousReviews])
+      setResult(analyzedReview)
+      setReview('')
+    } catch {
+      setSubmitError('Could not reach the API. Start the backend, then try again.')
+    } finally {
+      setSubmitting(false)
     }
-    // Add the new review to the beginning of the list
-    setReviews((previousReviews) => [newReview, ...previousReviews])
-
-    // Display a submission confirmation
-    setResult({
-      text: newReview.text,
-      sentiment: newReview.sentiment,
-    })
-    // Clear the text box
-    setReview('')
   }
 
   // Read customer reviews from a CSV file
@@ -197,8 +244,7 @@ export default function App() {
       <h1>Customer Sentiment Dashboard</h1>
       <p className="intro">
         Review customer feedback and monitor sentiment trends.
-        Review submission, CSV upload, charts, and history will be added in a later milestone.
-        This page checks whether the API is reachable.
+        A submitted review is analyzed by the API and kept in this browser until you refresh the page.
       </p>
 
       {/* Backend connection status */}
@@ -229,13 +275,19 @@ export default function App() {
             onChange={(event) => {
               setReview(event.target.value)
               setResult(null)
+              setSubmitError('')
             }}
             placeholder="Example: The service was excellent, and the staff were very helpful."
             required
           />
 
-          <button type="submit">Submit Review</button>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Analyzing...' : 'Submit Review'}
+          </button>
         </form>
+
+        {submitting && <p>Analyzing...</p>}
+        {submitError && <p role="alert">{submitError}</p>}
 
           {/* CSV upload */}
           <section>
@@ -275,8 +327,8 @@ export default function App() {
               Sentiment: <strong>{result.sentiment}</strong>
             </p>
             <p>
-              This is a temporary result. Real AI analysis will be connected
-              in a later step.
+              Confidence: positive {result.confidence.positive}, neutral{' '}
+              {result.confidence.neutral}, negative {result.confidence.negative}
             </p>
           </section>
         )}
@@ -385,6 +437,12 @@ export default function App() {
             <p>
               Sentiment: <strong>{item.sentiment}</strong>
             </p>
+            {item.confidence && (
+              <p>
+                Confidence: positive {item.confidence.positive}, neutral{' '}
+                {item.confidence.neutral}, negative {item.confidence.negative}
+              </p>
+            )}
 
             <hr />
           </article>

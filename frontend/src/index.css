@@ -86,6 +86,11 @@ button:hover {
   background-color: #194b86;
 }
 
+button:disabled {
+  background-color: #8aa4c4;
+  cursor: not-allowed;
+}
+
 button:focus-visible {
   outline: 3px solid #8bbcff;
   outline-offset: 2px;
