@@ -1,9 +1,8 @@
 import json
 import os
-
+import urllib.error
+import urllib.request
 import azure.functions as func
-from azure.ai.textanalytics import TextAnalyticsClient
-from azure.core.credentials import AzureKeyCredential
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -17,71 +16,84 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
         mimetype="application/json",
     )
 
-@app.route(route="analyze", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def analyze(req: func.HttpRequest) -> func.HttpResponse:
-    """Analyze the sentiment of a customer review."""
-
+@app.route(route="reviews", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def create_review(req: func.HttpRequest) -> func.HttpResponse:
+    """Analyze one review with Azure AI Language. Does not save it."""
     try:
-        # Get the review from the website.
-        req_body = req.get_json()
-        review_text = req_body.get("text", "").strip()
-
-        if not review_text:
-            return func.HttpResponse(
-                json.dumps({"error": "Please provide a review."}),
-                status_code=400,
-                mimetype="application/json",
-            )
-
-        # Get the Azure AI Language credentials.
-        key = os.environ["LANGUAGE_KEY"]
-        endpoint = os.environ["LANGUAGE_ENDPOINT"]
-
-        # Connect to Azure AI Language.
-        client = TextAnalyticsClient(
-            endpoint=endpoint,
-            credential=AzureKeyCredential(key),
-        )
-
-        # Send the review for sentiment analysis.
-        response = client.analyze_sentiment(
-            documents=[review_text],
-            show_opinion_mining=False,
-        )
-
-        result = response[0]
-
-        if result.is_error:
-            return func.HttpResponse(
-                json.dumps({"error": result.error.message}),
-                status_code=500,
-                mimetype="application/json",
-            )
-
-        # Return the sentiment and confidence scores.
-        return func.HttpResponse(
-            json.dumps({
-                "sentiment": result.sentiment.capitalize(),
-                "confidenceScores": {
-                    "positive": result.confidence_scores.positive,
-                    "neutral": result.confidence_scores.neutral,
-                    "negative": result.confidence_scores.negative,
-                },
-            }),
-            status_code=200,
-            mimetype="application/json",
-        )
-
+        body = req.get_json()
     except ValueError:
+        body = None
+
+    review_text = ""
+    if isinstance(body, dict):
+        review_text = str(body.get("reviewText") or "").strip()
+
+    if not review_text:
         return func.HttpResponse(
-            json.dumps({"error": "Invalid request. Please send valid JSON."}),
+            body=json.dumps({"error": "reviewText is required"}),
             status_code=400,
             mimetype="application/json",
         )
 
-    except Exception:
+    endpoint = os.environ.get("LANGUAGE_ENDPOINT", "").rstrip("/")
+    key = os.environ.get("LANGUAGE_KEY", "")
+    if not endpoint or not key:
         return func.HttpResponse(
-            json.dumps({"error": "Sentiment analysis failed. Check your Azure configuration."}),
+            body=json.dumps({"error": "Language settings are missing"}),
             status_code=500,
             mimetype="application/json",
         )
+
+    payload = {
+        "kind": "SentimentAnalysis",
+        "analysisInput": {
+            "documents": [
+                {"id": "1", "language": "en", "text": review_text}
+            ]
+        },
+    }
+    request = urllib.request.Request(
+        f"{endpoint}/language/:analyze-text?api-version=2023-04-01",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Ocp-Apim-Subscription-Key": key,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        return func.HttpResponse(
+            body=json.dumps({"error": "Language request failed", "status": error.code}),
+            status_code=502,
+            mimetype="application/json",
+        )
+
+    documents = result.get("results", {}).get("documents", [])
+    if not documents:
+        return func.HttpResponse(
+            body=json.dumps({"error": "Language returned no document"}),
+            status_code=502,
+            mimetype="application/json",
+        )
+
+    document = documents[0]
+    scores = document["confidenceScores"]
+    
+    analyzed = {
+        "reviewText": review_text,
+        "sentiment": document["sentiment"],
+        "confidence": {
+            "positive": scores["positive"],
+            "neutral": scores["neutral"],
+            "negative": scores["negative"],
+        },
+    }
+    return func.HttpResponse(
+        body=json.dumps(analyzed),
+        status_code=200,
+        mimetype="application/json",
+    )

@@ -20,6 +20,13 @@ const LOADING = 'loading'
 const CONNECTED = 'connected'
 const FAILED = 'failed'
 
+const SENTIMENT_LABELS = {
+  positive: 'Positive',
+  negative: 'Negative',
+  neutral: 'Neutral',
+  mixed: 'Mixed',
+}
+
 // add sample reviews
 const sampleReviews = [
   { id: 1, text: 'Excellent service and very helpful staff!', sentiment: 'Positive' },
@@ -41,6 +48,8 @@ export default function App() {
   const [csvReviews, setCsvReviews] = useState([])
   const [csvError, setCsvError] = useState('')
   const requestId = useRef(0)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   // Check whether the backend API is available
   const checkHealth = useCallback(async () => {
@@ -83,49 +92,55 @@ export default function App() {
 
 async function handleSubmit(event) {
   event.preventDefault()
+  const reviewText = review.trim()
+  if (!reviewText || submitting) return
 
-  if (!review.trim()) return
+  setSubmitting(true)
+  setSubmitError('')
+  setResult(null)
 
   try {
     // Send the review to the Azure Functions backend.
-    const response = await fetch('/api/analyze', {
+    const response = await fetch('/api/reviews', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: review.trim() }),
+      body: JSON.stringify({ reviewText }),
     })
 
     // Get the sentiment analysis result.
     const data = await response.json()
+    const sentiment = SENTIMENT_LABELS[data?.sentiment]
+    const confidence = data?.confidence
 
-    if (!response.ok) {
-      throw new Error(data.error || 'Sentiment analysis failed.')
+    if (
+      !response.ok ||
+      !sentiment ||
+      !confidence ||
+      !['positive', 'neutral', 'negative'].every(
+        (key) => typeof confidence[key] === 'number'
+      )
+    ) {
+      setSubmitError(data?.error || 'Sentiment analysis failed.')
+      return
     }
 
     // Add the analyzed review to the dashboard.
     const newReview = {
       id: Date.now(),
-      text: review.trim(),
-      sentiment: data.sentiment,
+      text: data.reviewText || reviewText,
+      sentiment,
+      confidence,
     }
 
     setReviews((previousReviews) => [newReview, ...previousReviews])
-
-    // Display the analysis result.
-    setResult({
-      text: newReview.text,
-      sentiment: newReview.sentiment,
-    })
-
-    // Clear the review input.
+    setResult(newReview)
     setReview('')
-
-  } catch (error) {
-    setResult({
-      text: review.trim(),
-      sentiment: 'Error: ' + error.message,
-    })
+  } catch {
+    setSubmitError('Could not reach the API. Check that the backend is running.')
+  } finally {
+    setSubmitting(false)
   }
 }
 
@@ -262,13 +277,17 @@ async function handleSubmit(event) {
             onChange={(event) => {
               setReview(event.target.value)
               setResult(null)
+              setSubmitError('')
             }}
             placeholder="Example: The service was excellent, and the staff were very helpful."
             required
           />
 
-          <button type="submit">Submit Review</button>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Analyzing...' : 'Submit Review'}
+          </button>
         </form>
+        {submitError && <p role="alert">{submitError}</p>}
 
           {/* CSV upload */}
           <section>
@@ -307,6 +326,14 @@ async function handleSubmit(event) {
             <p>
               Sentiment: <strong>{result.sentiment}</strong>
             </p>
+
+            {result.confidence && (
+              <p>
+                Confidence: Positive {result.confidence.positive},
+                Neutral {result.confidence.neutral},
+                Negative {result.confidence.negative}
+              </p>
+            )}
           </section>
         )}
       </section>
@@ -379,14 +406,16 @@ async function handleSubmit(event) {
               <Tooltip />
               <Legend />
 
-              <Bar dataKey="value" name="Reviews">
-                {barData.map((entry) => (
+              <Bar
+                dataKey="value"
+                name="Reviews"
+                shape={(props) => (
                   <Rectangle
-                    key={entry.name}
-                    fill={sentimentColors[entry.name]}
+                    {...props}
+                    fill={sentimentColors[props.payload.name]}
                   />
-                ))}
-              </Bar>
+                )}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -425,6 +454,12 @@ async function handleSubmit(event) {
             <p>
               Sentiment: <strong>{item.sentiment}</strong>
             </p>
+            {item.confidence && (
+              <p>
+                Confidence: positive {item.confidence.positive}, neutral{' '}
+                {item.confidence.neutral}, negative {item.confidence.negative}
+              </p>
+            )}
 
             <hr />
           </article>
