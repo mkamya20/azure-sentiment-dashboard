@@ -469,4 +469,4 @@ async function handleSubmit(event) {
   )
 }
 
-// continue to update with more implementation as needed
+// continue to update with more implementation as needed (CSV upload and sentiment analysis features)
