@@ -39,11 +39,21 @@ const sampleReviews = [
   { id: 8, text: 'Great product and fast delivery!', sentiment: 'Positive' },
 ]
 
+function savedReview(item) {
+  return {
+    id: item.id,
+    text: item.reviewText,
+    sentiment: SENTIMENT_LABELS[item.sentiment] || item.sentiment,
+    confidence: item.confidence,
+  }
+}
+
 export default function App() {
   const [state, setState] = useState(LOADING)
   const [review, setReview] = useState('')
   const [result, setResult] = useState(null)
   const [reviews, setReviews] = useState(sampleReviews)
+  const [reviewsError, setReviewsError] = useState('')
   const [selectedSentiment, setSelectedSentiment] = useState('All')
   const [csvReviews, setCsvReviews] = useState([])
   const [csvError, setCsvError] = useState('')
@@ -84,9 +94,41 @@ export default function App() {
     }
   }, [])
 
+  const reviewsRequest = useRef(0)
+
+  const loadReviews = useCallback(async () => {
+    const request = reviewsRequest.current + 1
+    reviewsRequest.current = request
+
+    try {
+      const response = await fetch('/api/reviews')
+      let data = null
+      try {
+        data = await response.json()
+      } catch {
+        data = null
+      }
+
+      if (request !== reviewsRequest.current) return
+
+      if (!response.ok || !Array.isArray(data)) {
+        setReviewsError(data?.error || 'Saved reviews could not be loaded.')
+        return
+      }
+
+      const saved = data.filter((item) => item.reviewText).map(savedReview)
+      setReviews([...saved, ...sampleReviews])
+      setReviewsError('')
+    } catch {
+      if (request !== reviewsRequest.current) return
+      setReviewsError('Saved reviews could not be loaded. Start the API, then refresh.')
+    }
+  }, [])
+
   useEffect(() => {
     checkHealth()
-  }, [checkHealth])
+    loadReviews()
+  }, [checkHealth, loadReviews])
 
   // Add a submitted review to the dashboard
 
@@ -128,12 +170,13 @@ async function handleSubmit(event) {
 
     // Add the analyzed review to the dashboard.
     const newReview = {
-      id: Date.now(),
+      id: data.id || Date.now(),
       text: data.reviewText || reviewText,
       sentiment,
       confidence,
     }
 
+    reviewsRequest.current += 1
     setReviews((previousReviews) => [newReview, ...previousReviews])
     setResult(newReview)
     setReview('')
@@ -246,7 +289,7 @@ async function handleSubmit(event) {
       <h1>Customer Sentiment Dashboard</h1>
       <p className="intro">
         Submit customer reviews, analyze sentiment using Azure AI,
-        upload customer feedback from CSV files, and monitor sentiment trends.
+        and review the saved results. A refresh loads the reviews stored in Cosmos DB.
       </p>
 
       {/* Backend connection status */}
@@ -424,6 +467,7 @@ async function handleSubmit(event) {
       {/* Review history */}
       <section>
         <h2>Review History</h2>
+        {reviewsError && <p role="alert">{reviewsError}</p>}
 
         <label htmlFor="sentiment-filter">Filter by sentiment:</label>
 
