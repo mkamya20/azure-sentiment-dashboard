@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import $ from 'jquery'
 
 import {
   PieChart,
@@ -16,10 +17,6 @@ import {
 
 import Papa from 'papaparse'
 
-const LOADING = 'loading'
-const CONNECTED = 'connected'
-const FAILED = 'failed'
-
 const SENTIMENT_LABELS = {
   positive: 'Positive',
   negative: 'Negative',
@@ -27,16 +24,12 @@ const SENTIMENT_LABELS = {
   mixed: 'Mixed',
 }
 
-// add sample reviews
-const sampleReviews = [
-  { id: 1, text: 'Excellent service and very helpful staff!', sentiment: 'Positive' },
-  { id: 2, text: 'My order arrived late and damaged.', sentiment: 'Negative' },
-  { id: 3, text: 'The product arrived yesterday.', sentiment: 'Neutral' },
-  { id: 4, text: 'Good quality, but shipping was disappointing.', sentiment: 'Mixed' },
-  { id: 5, text: 'I am very happy with my purchase.', sentiment: 'Positive' },
-  { id: 6, text: 'Customer support never responded.', sentiment: 'Negative' },
-  { id: 7, text: 'The product works as expected.', sentiment: 'Neutral' },
-  { id: 8, text: 'Great product and fast delivery!', sentiment: 'Positive' },
+const NAV_LINKS = [
+  ['overview', 'Overview'],
+  ['insights', 'Insights'],
+  ['submit', 'Submit'],
+  ['upload', 'Upload'],
+  ['history', 'History'],
 ]
 
 function savedReview(item) {
@@ -48,51 +41,31 @@ function savedReview(item) {
   }
 }
 
+function formatScore(value) {
+  return `${Math.round(value * 100)}%`
+}
+
+function scrollToId(id) {
+  const target = document.getElementById(id)
+  if (!target) return
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  $('html, body')
+    .stop()
+    .animate({ scrollTop: $(target).offset().top - 78 }, reduceMotion ? 0 : 520)
+}
+
 export default function App() {
-  const [state, setState] = useState(LOADING)
   const [review, setReview] = useState('')
   const [result, setResult] = useState(null)
-  const [reviews, setReviews] = useState(sampleReviews)
+  const [reviews, setReviews] = useState([])
   const [reviewsError, setReviewsError] = useState('')
   const [selectedSentiment, setSelectedSentiment] = useState('All')
   const [csvReviews, setCsvReviews] = useState([])
   const [csvError, setCsvError] = useState('')
-  const requestId = useRef(0)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-
-  // Check whether the backend API is available
-  const checkHealth = useCallback(async () => {
-    const currentRequest = requestId.current + 1
-    requestId.current = currentRequest
-    setState(LOADING)
-
-    try {
-      const response = await fetch('/api/health')
-      let body = null
-      try {
-        body = await response.json()
-      } catch {
-        body = null
-      }
-
-      if (currentRequest !== requestId.current) {
-        return
-      }
-
-      if (response.ok && body?.status === 'ok') {
-        setState(CONNECTED)
-        return
-      }
-
-      setState(FAILED)
-    } catch {
-      if (currentRequest !== requestId.current) {
-        return
-      }
-      setState(FAILED)
-    }
-  }, [])
+  const [activeSection, setActiveSection] = useState('overview')
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const reviewsRequest = useRef(0)
 
@@ -117,7 +90,7 @@ export default function App() {
       }
 
       const saved = data.filter((item) => item.reviewText).map(savedReview)
-      setReviews([...saved, ...sampleReviews])
+      setReviews(saved)
       setReviewsError('')
     } catch {
       if (request !== reviewsRequest.current) return
@@ -126,9 +99,68 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    checkHealth()
     loadReviews()
-  }, [checkHealth, loadReviews])
+  }, [loadReviews])
+
+  useEffect(() => {
+    const sections = NAV_LINKS.map(([id]) => id)
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    const onScroll = () => {
+      const y = $(window).scrollTop()
+      $('body').toggleClass('nav-scrolled', y > 8)
+
+      let current = sections[0]
+      sections.forEach((id) => {
+        const section = document.getElementById(id)
+        if (section && section.offsetTop - 110 <= y) current = id
+      })
+      setActiveSection((previous) => (previous === current ? previous : current))
+    }
+
+    const onMove = (event) => {
+      document.documentElement.style.setProperty('--spot-x', `${event.clientX}px`)
+      document.documentElement.style.setProperty('--spot-y', `${event.clientY}px`)
+    }
+
+    const onButtonClick = (event) => {
+      const button = event.target.closest?.('.btn')
+      if (!button || button.disabled || reduceMotion) return
+      const ripple = $('<span class="ripple" aria-hidden="true"></span>')
+      ripple.css({
+        position: 'fixed',
+        left: `${event.clientX}px`,
+        top: `${event.clientY}px`,
+        zIndex: 80,
+      })
+      $('body').append(ripple)
+      window.setTimeout(() => ripple.remove(), 650)
+    }
+
+    $(window).on('scroll.dashboard', onScroll)
+    $(document).on('mousemove.dashboard', onMove)
+    $(document).on('click.dashboard', '.btn', onButtonClick)
+    onScroll()
+
+    return () => {
+      $(window).off('.dashboard')
+      $(document).off('.dashboard')
+      $('body').removeClass('nav-scrolled')
+    }
+  }, [])
+
+  function handleNavClick(event) {
+    event.preventDefault()
+    const id = event.currentTarget.getAttribute('href').slice(1)
+    setMenuOpen(false)
+    setActiveSection(id)
+    scrollToId(id)
+  }
+
+  function focusSentiment(sentiment) {
+    setSelectedSentiment(sentiment)
+    scrollToId('history')
+  }
 
   // Add a submitted review to the dashboard
 
@@ -260,10 +292,10 @@ async function handleSubmit(event) {
 
   // Prepare the data for the charts
   const sentimentColors = {
-    Positive: '#23865A',
-    Negative: '#D94B4B',
-    Neutral: '#3478C5',
-    Mixed: '#8957B2',
+    Positive: '#1f8a4c',
+    Negative: '#c44536',
+    Neutral: '#3e5f8a',
+    Mixed: '#7a4e9a',
   }
 
   const sentimentData = ['Positive', 'Negative', 'Neutral', 'Mixed'].map(
@@ -284,232 +316,260 @@ async function handleSubmit(event) {
           (item) => item.sentiment === selectedSentiment
         )
 
+  const statCards = [
+    { key: 'All', label: 'Total', value: totalReviews, hint: 'Reviews in view', accent: '#002d72' },
+    { key: 'Positive', label: 'Positive', value: countSentiment('Positive'), hint: `${percentage('Positive')}%`, accent: '#1f8a4c' },
+    { key: 'Negative', label: 'Negative', value: countSentiment('Negative'), hint: `${percentage('Negative')}%`, accent: '#c44536' },
+    { key: 'Neutral', label: 'Neutral', value: countSentiment('Neutral'), hint: `${percentage('Neutral')}%`, accent: '#3e5f8a' },
+    { key: 'Mixed', label: 'Mixed', value: countSentiment('Mixed'), hint: `${percentage('Mixed')}%`, accent: '#7a4e9a' },
+  ]
+
+  const chartTooltip = {
+    contentStyle: {
+      background: '#001833',
+      border: '1px solid rgba(247, 105, 0, 0.55)',
+      borderRadius: 12,
+      color: '#fff',
+    },
+    itemStyle: { color: '#fff' },
+    labelStyle: { color: '#f76900' },
+  }
+
   return (
-    <main>
+    <div className="app-shell">
+      <header className="navbar">
+        <a className="brand" href="#overview" onClick={handleNavClick}>
+          
+          <span>
+            <strong>Customer Sentiment</strong>
+            <small>Live dashboard</small>
+          </span>
+        </a>
+
+        <button
+          type="button"
+          className="btn nav-toggle"
+          aria-expanded={menuOpen}
+          aria-controls="site-nav"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? 'Close' : 'Menu'}
+        </button>
+
+        <nav id="site-nav" className={menuOpen ? 'nav-links is-open' : 'nav-links'}>
+          {NAV_LINKS.map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={activeSection === id ? 'is-active' : undefined}
+              onClick={handleNavClick}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </header>
+
+      <main>
+      <section id="overview" className="hero">
+      <p className="eyebrow">Azure AI Language</p>
       <h1>Customer Sentiment Dashboard</h1>
       <p className="intro">
         Submit customer reviews, analyze sentiment using Azure AI,
         and review the saved results. A refresh loads the reviews stored in Cosmos DB.
       </p>
-
-      {/* Backend connection status */}
-      <section className="status" aria-live="polite">
-        {state === LOADING && <p>Checking backend connection…</p>}
-        {state === CONNECTED && <p>Backend connected</p>}
-        {state === FAILED && (
-          <p>Connection failed. Start the API, then try again.</p>
-        )}
-        {state !== LOADING && (
-          <button type="button" onClick={checkHealth}>
-            Retry
-          </button>
-        )}
+      
+      <p className="section-kicker alert">Pending reviews: {countSentiment('Pending')}</p>
       </section>
 
-      {/* Review submission form */}
-      <section>
-        <h2>Submit a Customer Review</h2>
-
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="review">Customer review</label>
-
-          <textarea
-            id="review"
-            rows="5"
-            value={review}
-            onChange={(event) => {
-              setReview(event.target.value)
-              setResult(null)
-              setSubmitError('')
-            }}
-            placeholder="Example: The service was excellent, and the staff were very helpful."
-            required
-          />
-
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Analyzing...' : 'Submit Review'}
+      <section className="stat-grid" aria-label="Sentiment totals">
+        {statCards.map((card) => (
+          <button
+            key={card.key}
+            type="button"
+            className={selectedSentiment === card.key ? 'stat-card is-selected' : 'stat-card'}
+            style={{ '--accent': card.accent }}
+            onClick={() => focusSentiment(card.key)}
+          >
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <small>{card.hint}</small>
           </button>
-        </form>
-        {submitError && <p role="alert">{submitError}</p>}
+        ))}
+      </section>
+      <section id="insights" className="panel">
+        <h2>Sentiment Insights</h2>
+        <p className="section-kicker">
+          Distribution across the reviews currently on the dashboard.
+        </p>
+        <div className="chart-grid">
+          <div className="chart-card">
+            <h3>Distribution</h3>
+            <div className="chart-frame">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={sentimentData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={58}
+                    outerRadius={96}
+                    paddingAngle={3}
+                    stroke="#fff"
+                  />
+                  <Tooltip {...chartTooltip} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="chart-card">
+            <h3>Review counts</h3>
+            <div className="chart-frame">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#d5deea" />
+                  <XAxis dataKey="name" stroke="#5c6b80" />
+                  <YAxis allowDecimals={false} stroke="#5c6b80" />
+                  <Tooltip {...chartTooltip} />
+                  <Bar
+                    dataKey="value"
+                    name="Reviews"
+                    radius={[8, 8, 0, 0]}
+                    shape={(props) => (
+                      <Rectangle
+                        {...props}
+                        radius={[8, 8, 0, 0]}
+                        fill={sentimentColors[props.payload.name]}
+                      />
+                    )}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          {/* CSV upload */}
-          <section>
-            <h2>Upload Customer Reviews</h2>
-
-            <p>Select a CSV file containing a review, text, or feedback column.</p>
-
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleCsvUpload}
+      <div className="workspace">
+        <section id="submit" className="panel">
+          <h2>Submit a Review</h2>
+          <p className="section-kicker">One review is analyzed and saved.</p>
+          <form onSubmit={handleSubmit}>
+            <label htmlFor="review">Customer review</label>
+            <textarea
+              id="review"
+              rows="5"
+              value={review}
+              onChange={(event) => {
+                setReview(event.target.value)
+                setResult(null)
+                setSubmitError('')
+              }}
+              placeholder="Example: The service was excellent, and the staff were very helpful."
+              required
             />
+            <button type="submit" className="btn" disabled={submitting}>
+              {submitting ? 'Analyzing...' : 'Submit Review'}
+            </button>
+          </form>
+          {submitError && <p className="alert" role="alert">{submitError}</p>}
+        </section>
 
-            {csvError && <p role="alert">{csvError}</p>}
-
-            {csvReviews.length > 0 && (
-              <div>
-                <h3>CSV Preview</h3>
-
-                <p>Reviews found: {csvReviews.length}</p>
-
+        <section id="upload" className="panel">
+          <h2>Upload Reviews</h2>
+          <p className="section-kicker">
+            Select a CSV file containing a review, text, or feedback column.
+          </p>
+          <label className="dropzone">
+            <input type="file" accept=".csv" onChange={handleCsvUpload} />
+            <strong>Choose a CSV file</strong>
+            <span>review_text, review, text, or feedback</span>
+          </label>
+          {csvError && <p className="alert" role="alert">{csvError}</p>}
+          {csvReviews.length > 0 && (
+            <div>
+              <h3>CSV Preview</h3>
+              <p>{csvReviews.length} reviews found. This preview stays in the browser.</p>
+              <div className="preview-list">
                 {csvReviews.map((item) => (
                   <article key={item.id} className="review-item">
                     <p>{item.text}</p>
                   </article>
                 ))}
               </div>
-            )}
-          </section>
+            </div>
+          )}
+        </section>
+      </div>
 
-        {/* Submission confirmation */}
-        {result && (
-          <section aria-live="polite">
-            <h3>Review Submitted</h3>
-            <p>{result.text}</p>
-            <p>
-              Sentiment: <strong>{result.sentiment}</strong>
-            </p>
-
-            {result.confidence && (
-              <p>
-                Confidence: Positive {result.confidence.positive},
-                Neutral {result.confidence.neutral},
-                Negative {result.confidence.negative}
-              </p>
-            )}
-          </section>
-        )}
-      </section>
-
-      {/* Sentiment overview */}
-      <section>
-        <h2>Sentiment Overview</h2>
-
-        <p>
-          <strong>Total Reviews:</strong> {totalReviews}
-        </p>
-
-        <div className="sentiment-summary">
+      {result && (
+        <section className={`result-banner panel ${result.sentiment.toLowerCase()}`} aria-live="polite">
+          <h2>Review Submitted</h2>
+          <p>{result.text}</p>
           <p>
-            <strong>Positive:</strong> {countSentiment('Positive')} (
-            {percentage('Positive')}%)
+            <span className="sentiment-tag">{result.sentiment}</span>
           </p>
+          <ConfidenceBars confidence={result.confidence} />
+        </section>
+      )}
 
-          <p>
-            <strong>Negative:</strong> {countSentiment('Negative')} (
-            {percentage('Negative')}%)
-          </p>
-
-          <p>
-            <strong>Neutral:</strong> {countSentiment('Neutral')} (
-            {percentage('Neutral')}%)
-          </p>
-
-          <p>
-            <strong>Mixed:</strong> {countSentiment('Mixed')} (
-            {percentage('Mixed')}%)
-          </p>
-
-          <p>
-            <strong>Pending:</strong> {countSentiment('Pending')}
-          </p>
-        </div>
-
-          {/* Pie chart */}
-          <h3>Sentiment Distribution</h3>
-
-          <div style={{ width: '100%', height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={sentimentData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  label
-                />
-
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+      <section id="history" className="panel">
+        <div className="history-head">
+          <div>
+            <h2>Review History</h2>
+            <p className="section-kicker">Saved reviews stay after a refresh.</p>
           </div>
-
-        {/* Bar chart */}
-        <h3>Review Counts by Sentiment</h3>
-
-        <div style={{ width: '100%', height: 300 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={barData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Legend />
-
-              <Bar
-                dataKey="value"
-                name="Reviews"
-                shape={(props) => (
-                  <Rectangle
-                    {...props}
-                    fill={sentimentColors[props.payload.name]}
-                  />
-                )}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div>
+            <label htmlFor="sentiment-filter">Filter by sentiment</label>
+            <select
+              id="sentiment-filter"
+              value={selectedSentiment}
+              onChange={(event) => setSelectedSentiment(event.target.value)}
+            >
+              <option value="All">All Reviews</option>
+              <option value="Positive">Positive</option>
+              <option value="Negative">Negative</option>
+              <option value="Neutral">Neutral</option>
+              <option value="Mixed">Mixed</option>
+              <option value="Pending">Pending</option>
+            </select>
+          </div>
         </div>
-      </section>
-
-      {/* Review history */}
-      <section>
-        <h2>Review History</h2>
-        {reviewsError && <p role="alert">{reviewsError}</p>}
-
-        <label htmlFor="sentiment-filter">Filter by sentiment:</label>
-
-        <select
-          id="sentiment-filter"
-          value={selectedSentiment}
-          onChange={(event) => setSelectedSentiment(event.target.value)}
-        >
-          <option value="All">All Reviews</option>
-          <option value="Positive">Positive</option>
-          <option value="Negative">Negative</option>
-          <option value="Neutral">Neutral</option>
-          <option value="Mixed">Mixed</option>
-          <option value="Pending">Pending</option>
-        </select>
-
-        {filteredReviews.length === 0 && (
-          <p>No reviews match this filter.</p>
-        )}
-
+        {reviewsError && <p className="alert" role="alert">{reviewsError}</p>}
+        {filteredReviews.length === 0 && <p>No reviews match this filter.</p>}
         {filteredReviews.map((item) => (
-          <article
-            className={`review-item ${item.sentiment.toLowerCase()}`}
-            key={item.id}
-          >
+          <article className={`review-item ${item.sentiment.toLowerCase()}`} key={item.id}>
             <p>{item.text}</p>
-
             <p>
-              Sentiment: <strong>{item.sentiment}</strong>
+              <span className="sentiment-tag">{item.sentiment}</span>
             </p>
-            {item.confidence && (
-              <p>
-                Confidence: positive {item.confidence.positive}, neutral{' '}
-                {item.confidence.neutral}, negative {item.confidence.negative}
-              </p>
-            )}
-
-            <hr />
+            <ConfidenceBars confidence={item.confidence} />
           </article>
         ))}
       </section>
-    </main>
+      </main>
+      <footer className="footer">Customer Sentiment Dashboard · Azure AI Language</footer>
+    </div>
+  )
+}
+
+function ConfidenceBars({ confidence }) {
+  if (!confidence) return null
+  return (
+    <div className="confidence">
+      {['positive', 'neutral', 'negative'].map((key) => (
+        <div className="confidence-row" key={key}>
+          <span>{key}</span>
+          <span className="bar">
+            <i style={{ width: `${Math.round(confidence[key] * 100)}%` }} />
+          </span>
+          <span>{formatScore(confidence[key])}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
