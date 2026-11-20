@@ -453,6 +453,11 @@ select:focus {
   background: #fff8f3;
 }
 
+.dropzone.is-busy {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
 .dropzone input {
   position: absolute;
   inset: 0;

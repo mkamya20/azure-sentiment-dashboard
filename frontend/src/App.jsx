@@ -45,6 +45,15 @@ function formatScore(value) {
   return `${Math.round(value * 100)}%`
 }
 
+function columnNamed(headers, names) {
+  return headers.find((header) => names.includes(header.trim().toLowerCase()))
+}
+
+function reviewDate(value) {
+  const text = String(value || '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null
+}
+
 function scrollToId(id) {
   const target = document.getElementById(id)
   if (!target) return
@@ -62,6 +71,8 @@ export default function App() {
   const [selectedSentiment, setSelectedSentiment] = useState('All')
   const [csvReviews, setCsvReviews] = useState([])
   const [csvError, setCsvError] = useState('')
+  const [csvUploading, setCsvUploading] = useState(false)
+  const [csvSummary, setCsvSummary] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [activeSection, setActiveSection] = useState('overview')
@@ -219,14 +230,73 @@ async function handleSubmit(event) {
   }
 }
 
-  // Read customer reviews from a CSV file
+  async function saveCsvReviews(fileName, loadedReviews) {
+    setCsvUploading(true)
+    setCsvError('')
+    setCsvSummary(null)
+
+    try {
+      const response = await fetch('/api/uploads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName,
+          reviews: loadedReviews.map((item) => ({
+            rowNumber: item.rowNumber,
+            reviewText: item.text,
+            externalReviewId: item.externalReviewId,
+            originalReviewDate: item.originalReviewDate,
+          })),
+        }),
+      })
+
+      let data = null
+      try {
+        data = await response.json()
+      } catch {
+        data = null
+      }
+
+      if (!response.ok) {
+        setCsvError(data?.error || 'The CSV could not be saved.')
+        return
+      }
+
+      const saved = Array.isArray(data.reviews)
+        ? data.reviews.filter((item) => item.reviewText).map(savedReview)
+        : []
+      setCsvReviews(saved)
+      setCsvSummary({
+        totalRows: data.totalRows,
+        successful: data.successful,
+        skipped: data.skipped,
+        failed: data.failed,
+      })
+
+      if (!data.successful) {
+        setCsvError('No reviews were saved.')
+        return
+      }
+
+      reviewsRequest.current += 1
+      await loadReviews()
+    } catch {
+      setCsvError('Could not reach the API. Check that the backend is running.')
+    } finally {
+      setCsvUploading(false)
+    }
+  }
+
+  // Read customer reviews from a CSV file and save the analysis.
 
   function handleCsvUpload(event) {
     const file = event.target.files[0]
+    event.target.value = ''
     setCsvReviews([])
     setCsvError('')
+    setCsvSummary(null)
 
-    if (!file) return
+    if (!file || csvUploading) return
 
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setCsvError('Please select a CSV file.')
@@ -239,13 +309,7 @@ async function handleSubmit(event) {
 
       complete: (results) => {
         const headers = results.meta.fields || []
-
-        // Find the column containing the customer reviews.
-        const reviewColumn = headers.find((header) =>
-          ['review_text', 'review', 'text', 'feedback'].includes(
-            header.trim().toLowerCase()
-          )
-        )
+        const reviewColumn = columnNamed(headers, ['review_text', 'review', 'text', 'feedback'])
 
         if (!reviewColumn) {
           setCsvError(
@@ -254,14 +318,19 @@ async function handleSubmit(event) {
           return
         }
 
-        // Extract the reviews from the selected column.
+        const idColumn = columnNamed(headers, ['external_review_id', 'review_id'])
+        const dateColumn = columnNamed(headers, ['original_review_date', 'review_date', 'date'])
         const loadedReviews = results.data
           .map((row, index) => {
             const text = row[reviewColumn]?.trim()
-
-            return text
-              ? { id: `${file.name}-${index}`, text }
-              : null
+            if (!text) return null
+            return {
+              id: `${file.name}-${index}`,
+              text,
+              rowNumber: index + 2,
+              externalReviewId: idColumn ? row[idColumn]?.trim() || null : null,
+              originalReviewDate: dateColumn ? reviewDate(row[dateColumn]) : null,
+            }
           })
           .filter(Boolean)
 
@@ -270,7 +339,13 @@ async function handleSubmit(event) {
           return
         }
 
+        if (loadedReviews.length > 50) {
+          setCsvError('Upload at most 50 reviews at a time.')
+          return
+        }
+
         setCsvReviews(loadedReviews)
+        saveCsvReviews(file.name, loadedReviews)
       },
 
       error: () => {
@@ -481,22 +556,32 @@ async function handleSubmit(event) {
         <section id="upload" className="panel">
           <h2>Upload Reviews</h2>
           <p className="section-kicker">
-            Select a CSV file containing a review, text, or feedback column.
+            Select a CSV file. Each review is analyzed and saved.
           </p>
-          <label className="dropzone">
-            <input type="file" accept=".csv" onChange={handleCsvUpload} />
-            <strong>Choose a CSV file</strong>
-            <span>review_text, review, text, or feedback</span>
+          <label className={csvUploading ? 'dropzone is-busy' : 'dropzone'}>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleCsvUpload}
+              disabled={csvUploading}
+            />
+            <strong>{csvUploading ? 'Analyzing and saving...' : 'Choose a CSV file'}</strong>
+            <span>review_text, review, text, or feedback. Up to 50 rows.</span>
           </label>
           {csvError && <p className="alert" role="alert">{csvError}</p>}
+          {csvSummary && (
+            <p>
+              Saved {csvSummary.successful} of {csvSummary.totalRows}. Skipped {csvSummary.skipped}. Failed {csvSummary.failed}.
+            </p>
+          )}
           {csvReviews.length > 0 && (
             <div>
-              <h3>CSV Preview</h3>
-              <p>{csvReviews.length} reviews found. This preview stays in the browser.</p>
+              <h3>{csvUploading ? 'CSV Preview' : 'Uploaded reviews'}</h3>
               <div className="preview-list">
                 {csvReviews.map((item) => (
-                  <article key={item.id} className="review-item">
+                  <article key={item.id} className={`review-item ${item.sentiment ? item.sentiment.toLowerCase() : ''}`}>
                     <p>{item.text}</p>
+                    {item.sentiment && <span className="sentiment-tag">{item.sentiment}</span>}
                   </article>
                 ))}
               </div>
